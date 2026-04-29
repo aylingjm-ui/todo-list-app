@@ -2,16 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import MyLists from './components/MyLists';
 import ListDetail from './components/ListDetail';
 import Toast from './components/Toast';
-import { List, PendingDeletion, Task } from './types';
-import { createDefaultLists, createId, pickListStyle } from './utils';
+import { List, PendingTaskAction, Task } from './types';
+import { pwaUpdateEvent } from './pwa';
+import { createDefaultLists, createId, normalizeLists, pickListStyle } from './utils';
 
 const STORAGE_KEY = 'reminders-lite-data';
 const TOAST_MS = 4000;
-const COMPLETE_ANIMATION_MS = 180;
 
-type ActiveToast = {
+type ToastState = {
   id: string;
   message: string;
+  actionLabel?: string;
+  kind: 'task' | 'update';
 };
 
 const loadLists = (): List[] => {
@@ -25,11 +27,7 @@ const loadLists = (): List[] => {
   }
 
   try {
-    const parsed = JSON.parse(raw) as List[];
-    if (!Array.isArray(parsed)) {
-      return createDefaultLists();
-    }
-    return parsed;
+    return normalizeLists(JSON.parse(raw));
   } catch {
     return createDefaultLists();
   }
@@ -38,8 +36,8 @@ const loadLists = (): List[] => {
 export default function App() {
   const [lists, setLists] = useState<List[]>(loadLists);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
-  const [toast, setToast] = useState<ActiveToast | null>(null);
-  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [pendingTaskAction, setPendingTaskAction] = useState<PendingTaskAction | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -52,15 +50,34 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    const showUpdatePrompt = () => {
+      if (toastTimeoutRef.current) {
+        window.clearTimeout(toastTimeoutRef.current);
+        toastTimeoutRef.current = null;
+      }
+
+      setToast({
+        id: createId(),
+        kind: 'update',
+        message: 'App updated. Refresh to use the latest version.',
+        actionLabel: 'Refresh',
+      });
+    };
+
+    window.addEventListener(pwaUpdateEvent, showUpdatePrompt);
+    return () => window.removeEventListener(pwaUpdateEvent, showUpdatePrompt);
+  }, []);
+
   const selectedList = lists.find((list) => list.id === selectedListId) ?? null;
 
-  const scheduleToastExpiry = () => {
+  const scheduleTaskToastExpiry = () => {
     if (toastTimeoutRef.current) {
       window.clearTimeout(toastTimeoutRef.current);
     }
 
     toastTimeoutRef.current = window.setTimeout(() => {
-      setPendingDeletion(null);
+      setPendingTaskAction(null);
       setToast(null);
       toastTimeoutRef.current = null;
     }, TOAST_MS);
@@ -87,14 +104,18 @@ export default function App() {
     });
   };
 
-  const renameList = (listId: string, name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      return;
-    }
-
+  const updateList = (listId: string, updates: Pick<List, 'name' | 'color' | 'icon'>) => {
     setLists((current) =>
-      current.map((list) => (list.id === listId ? { ...list, name: trimmed } : list)),
+      current.map((list) =>
+        list.id === listId
+          ? {
+              ...list,
+              name: updates.name.trim() || list.name,
+              color: updates.color,
+              icon: updates.icon,
+            }
+          : list,
+      ),
     );
   };
 
@@ -139,51 +160,80 @@ export default function App() {
     );
   };
 
-  const deleteTask = (listId: string, taskId: string) => {
+  const deleteTask = (listId: string, task: Task) => {
     setLists((current) =>
       current.map((list) =>
         list.id === listId
-          ? { ...list, tasks: list.tasks.filter((task) => task.id !== taskId) }
+          ? { ...list, tasks: list.tasks.filter((entry) => entry.id !== task.id) }
           : list,
       ),
     );
   };
 
-  const completeTask = (listId: string, task: Task) => {
-    const list = lists.find((entry) => entry.id === listId);
-    if (!list) {
-      return;
-    }
-
-    const index = list.tasks.findIndex((entry) => entry.id === task.id);
-    if (index === -1) {
-      return;
-    }
-
+  const showTaskToast = (action: PendingTaskAction, message: string) => {
     if (toastTimeoutRef.current) {
       window.clearTimeout(toastTimeoutRef.current);
     }
 
-    setTimeout(() => {
-      setLists((current) =>
-        current.map((entry) =>
-          entry.id === listId
-            ? { ...entry, tasks: entry.tasks.filter((item) => item.id !== task.id) }
-            : entry,
-        ),
-      );
-      setPendingDeletion({ task, listId, index });
-      setToast({ id: createId(), message: `"${task.text}" completed` });
-      scheduleToastExpiry();
-    }, COMPLETE_ANIMATION_MS);
+    setPendingTaskAction(action);
+    setToast({ id: createId(), kind: 'task', message, actionLabel: 'Undo' });
+    scheduleTaskToastExpiry();
   };
 
-  const undoCompletion = () => {
-    if (!pendingDeletion) {
+  const completeTask = (listId: string, task: Task) => {
+    let pending: PendingTaskAction | null = null;
+
+    setLists((current) =>
+      current.map((list) => {
+        if (list.id !== listId) {
+          return list;
+        }
+
+        const index = list.tasks.findIndex((entry) => entry.id === task.id);
+        if (index === -1) {
+          return list;
+        }
+
+        pending = { listId, task, index, mode: 'complete' };
+        return { ...list, tasks: list.tasks.filter((entry) => entry.id !== task.id) };
+      }),
+    );
+
+    if (pending) {
+      showTaskToast(pending, `"${task.text}" completed`);
+    }
+  };
+
+  const swipeDeleteTask = (listId: string, task: Task) => {
+    let pending: PendingTaskAction | null = null;
+
+    setLists((current) =>
+      current.map((list) => {
+        if (list.id !== listId) {
+          return list;
+        }
+
+        const index = list.tasks.findIndex((entry) => entry.id === task.id);
+        if (index === -1) {
+          return list;
+        }
+
+        pending = { listId, task, index, mode: 'delete' };
+        return { ...list, tasks: list.tasks.filter((entry) => entry.id !== task.id) };
+      }),
+    );
+
+    if (pending) {
+      showTaskToast(pending, `"${task.text}" deleted`);
+    }
+  };
+
+  const undoTaskAction = () => {
+    if (!pendingTaskAction) {
       return;
     }
 
-    const { listId, task, index } = pendingDeletion;
+    const { listId, task, index } = pendingTaskAction;
     setLists((current) =>
       current.map((list) => {
         if (list.id !== listId) {
@@ -201,7 +251,7 @@ export default function App() {
       toastTimeoutRef.current = null;
     }
 
-    setPendingDeletion(null);
+    setPendingTaskAction(null);
     setToast(null);
   };
 
@@ -211,7 +261,9 @@ export default function App() {
       toastTimeoutRef.current = null;
     }
 
-    setPendingDeletion(null);
+    if (toast?.kind === 'task') {
+      setPendingTaskAction(null);
+    }
     setToast(null);
   };
 
@@ -232,9 +284,10 @@ export default function App() {
             onBack={() => setSelectedListId(null)}
             onAddTask={addTask}
             onDeleteTask={deleteTask}
+            onSwipeDeleteTask={swipeDeleteTask}
             onUpdateTask={updateTask}
             onCompleteTask={completeTask}
-            onRenameList={renameList}
+            onUpdateList={updateList}
             onDeleteList={deleteList}
           />
         ) : (
@@ -250,8 +303,8 @@ export default function App() {
       <Toast
         open={Boolean(toast)}
         message={toast?.message ?? ''}
-        actionLabel="Undo"
-        onAction={undoCompletion}
+        actionLabel={toast?.actionLabel}
+        onAction={toast?.kind === 'update' ? () => window.location.reload() : undoTaskAction}
         onClose={dismissToast}
       />
     </div>

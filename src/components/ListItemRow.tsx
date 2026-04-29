@@ -1,4 +1,5 @@
 import { List } from '../types';
+import { getListColorOption } from '../utils';
 
 type ListItemRowProps = {
   list: List;
@@ -7,6 +8,8 @@ type ListItemRowProps = {
 };
 
 export default function ListItemRow({ list, isLast, onOpen }: ListItemRowProps) {
+  const color = getListColorOption(list.color);
+
   return (
     <button
       type="button"
@@ -16,7 +19,7 @@ export default function ListItemRow({ list, isLast, onOpen }: ListItemRowProps) 
       }`}
     >
       <div
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${list.color}`}
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${color.badgeClass}`}
       >
         {list.icon}
       </div>

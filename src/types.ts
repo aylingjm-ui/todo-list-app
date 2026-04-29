@@ -11,8 +11,9 @@ export type List = {
   tasks: Task[];
 };
 
-export type PendingDeletion = {
+export type PendingTaskAction = {
   task: Task;
   listId: string;
   index: number;
+  mode: 'complete' | 'delete';
 };

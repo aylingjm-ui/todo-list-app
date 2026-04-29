@@ -28,6 +28,7 @@ export default function MyLists({
       <header className="px-1">
         <p className="text-sm font-medium text-slate-500">Lists</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">My Lists</h1>
+        <p className="mt-2 text-sm text-slate-500">A simple place for the things you need to remember.</p>
       </header>
 
       <section className="rounded-[28px] bg-white p-2 shadow-card">

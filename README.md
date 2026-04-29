@@ -1,6 +1,6 @@
-# My Lists
+# To Do List App
 
-Simple mobile-first list and task manager built with React, TypeScript, and Tailwind CSS.
+Simple mobile-first list and task manager built with React, TypeScript, and Tailwind CSS. The app is installable as a PWA and keeps list/task data in `localStorage`.
 
 ## Setup
 
@@ -18,6 +18,12 @@ npm run dev
 npm run build
 npm run preview
 ```
+
+## Installable PWA
+
+- On Android Chrome or Samsung Internet, open the deployed site and use `Install app`.
+- On iPhone Safari, use `Share` -> `Add to Home Screen`.
+- The app works offline after the first successful load of the app shell.
 
 ## Deploy to Vercel
 
@@ -43,4 +49,3 @@ vercel
 
 - Data is stored in `localStorage` under `reminders-lite-data`.
 - Completed tasks are removed from the UI immediately after a short fade-out and can be restored from the undo toast for 4 seconds.
-# todo-list-app
